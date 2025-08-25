@@ -1,4 +1,8 @@
-# React + TypeScript + Vite
+# AI scrummaster
+
+
+<img width="1964" height="1374" alt="image" src="https://github.com/user-attachments/assets/d3aa4b32-4840-4642-8b23-d9211f91566b" />
+
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
