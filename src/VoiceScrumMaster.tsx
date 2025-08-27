@@ -95,7 +95,7 @@ function extractInsights(text: string, owner: string) {
 }
 
 // ---------- Web Speech wrappers ----------
-function useSpeech() {
+function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number; voiceName: string }) {
   const [ttsReady, setTtsReady] = useState(false);
   const [listening, setListening] = useState(false);
   const [available, setAvailable] = useState<{ asr: boolean; tts: boolean }>({ asr: false, tts: false });
@@ -117,13 +117,58 @@ function useSpeech() {
     if (!available.tts) return;
     try {
       window.speechSynthesis.cancel();
+      
+      // Get available voices and select the best one
+      const voices = window.speechSynthesis.getVoices();
+      let selectedVoice = voices[0];
+      
+      // Try to find user's preferred voice first
+      if (voiceSettings.voiceName) {
+        const preferredVoice = voices.find(voice => voice.name === voiceSettings.voiceName);
+        if (preferredVoice) {
+          selectedVoice = preferredVoice;
+        }
+      }
+      
+      // Fallback to best available English voice
+      if (!selectedVoice || !selectedVoice.lang.startsWith('en')) {
+        selectedVoice = voices.find(voice => 
+          voice.lang.startsWith('en') && 
+          (voice.name.includes('Google') || voice.name.includes('Natural') || voice.name.includes('Premium'))
+        ) || voices.find(voice => voice.lang.startsWith('en')) || voices[0];
+      }
+      
+      // If no voices available, return early
+      if (!selectedVoice) {
+        console.warn('No speech synthesis voices available');
+        return;
+      }
+      
       const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1;
-      u.pitch = 1;
+      
+      // Enhanced voice settings for better quality
+      u.voice = selectedVoice;
+      u.rate = voiceSettings.rate; // Use user-configured rate
+      u.pitch = voiceSettings.pitch; // Use user-configured pitch
+      u.volume = voiceSettings.volume; // Use user-configured volume
       u.lang = "en-US";
-      window.speechSynthesis.speak(u);
+      
+      // Add pauses for better sentence structure
+      const enhancedText = text
+        .replace(/([.!?])\s+/g, '$1... ') // Add pauses after sentences
+        .replace(/([,;:])\s+/g, '$1... ') // Add pauses after punctuation
+        .replace(/\.\.\.\s*\.\.\./g, '...'); // Clean up multiple pauses
+      
+      u.text = enhancedText;
+      
+      // Wait for the speech to complete before continuing
+      return new Promise<void>((resolve) => {
+        u.onend = () => resolve();
+        u.onerror = () => resolve();
+        window.speechSynthesis.speak(u);
+      });
     } catch (e) {
-      // no-op
+      console.warn('Speech synthesis error:', e);
     }
   };
 
@@ -176,22 +221,16 @@ function useSpeech() {
 type Member = { id: string; name: string };
 
 type QA = {
-  yesterday: string;
-  today: string;
-  blockers: string;
+  update: string;
   transcript: string[]; // raw snippets
   elapsedSec: number;
 };
 
 const DEFAULT_QUESTIONS = [
-  { key: "yesterday", label: "What did you complete yesterday?" },
-  { key: "today", label: "What will you work on today?" },
-  { key: "blockers", label: "Any blockers or anything you need help with?" },
+  { key: "update", label: "Please give your update" },
 ] as const;
 
 export default function VoiceScrumMaster() {
-  const { speak, startListening, stopListening, listening, available } = useSpeech();
-
   // Video controls
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const teamSectionRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +241,15 @@ export default function VoiceScrumMaster() {
   // Standup state
   const [manualMode, setManualMode] = useState(false);
   const [slackWebhook, setSlackWebhook] = useState("");
+  const [emailAddress, setEmailAddress] = useState("shaival2023@gmail.com");
+  const [voiceSettings, setVoiceSettings] = useState({
+    rate: 0.9,
+    pitch: 1.1,
+    volume: 0.95,
+    voiceName: ""
+  });
+  
+  const { speak, startListening, stopListening, listening, available } = useSpeech(voiceSettings);
   const [team, setTeam] = useState<Member[]>([
     { id: uuid(), name: "Josh" },
     { id: uuid(), name: "Katie" },
@@ -210,6 +258,8 @@ export default function VoiceScrumMaster() {
   const [active, setActive] = useState(false);
   const [idx, setIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
+  const [completedMembers, setCompletedMembers] = useState<Set<string>>(new Set());
+  const [isAsking, setIsAsking] = useState(false);
   const [buffer, setBuffer] = useState("");
   const [finalBuffer, setFinalBuffer] = useState("");
   const [lastChunkAt, setLastChunkAt] = useState<number>(Date.now());
@@ -249,7 +299,7 @@ export default function VoiceScrumMaster() {
       const copy = { ...prev };
       for (const m of team) {
         if (!copy[m.id]) {
-          copy[m.id] = { yesterday: "", today: "", blockers: "", transcript: [], elapsedSec: 0 };
+          copy[m.id] = { update: "", transcript: [], elapsedSec: 0 };
         }
       }
       return copy;
@@ -288,29 +338,64 @@ export default function VoiceScrumMaster() {
     setMeetingStartedAt(Date.now());
     setIdx(0);
     setQIdx(0);
+    setCompletedMembers(new Set());
     setBuffer("");
     setFinalBuffer("");
-    await speak(`Good morning! Let's start our standup. We'll go in order: ${team.map((t) => t.name).join(", ")}.`);
-    await sleep(600);
+    await speak(`Good morning everyone! Let's start our standup. I'll go through each team member: ${team.map((t) => t.name).join(", ")}.`);
+    await sleep(800);
     await askCurrent();
   };
 
   const askCurrent = async () => {
-    const m = currentMember;
-    if (!m) return completeMeeting();
-    const q = currentQuestion;
-    await speak(`${m.name}, ${q.label}`);
-    setBuffer("");
-    setFinalBuffer("");
-    setLastChunkAt(Date.now());
-    if (!manualMode && available.asr) {
-      startListening({
-        onText: (txt, isFinal) => {
-          setLastChunkAt(Date.now());
-          if (isFinal) setFinalBuffer((prev) => (prev + " " + txt).trim());
-          else setBuffer(txt);
-        },
-      });
+    // Prevent multiple simultaneous calls
+    if (isAsking) {
+      console.log('Already asking a question, skipping...');
+      return;
+    }
+    
+    setIsAsking(true);
+    
+    try {
+      // Find the next uncompleted member
+      const nextUncompletedIndex = team.findIndex(member => !completedMembers.has(member.id));
+      if (nextUncompletedIndex === -1) {
+        setIsAsking(false);
+        return completeMeeting();
+      }
+      
+      // Update the current index to the next uncompleted member
+      setIdx(nextUncompletedIndex);
+      
+      const m = team[nextUncompletedIndex];
+      const q = currentQuestion;
+      
+      if (!q) {
+        console.error('No current question found');
+        setIsAsking(false);
+        return;
+      }
+      
+      console.log(`Asking ${m.name} for their update (ID: ${m.id}, idx: ${nextUncompletedIndex})`);
+      console.log(`Current completed members:`, Array.from(completedMembers));
+      
+      // Simple question prompt
+      const questionPrompt = `${m.name}, please give your update.`;
+      
+      await speak(questionPrompt);
+      setBuffer("");
+      setFinalBuffer("");
+      setLastChunkAt(Date.now());
+      if (!manualMode && available.asr) {
+        startListening({
+          onText: (txt, isFinal) => {
+            setLastChunkAt(Date.now());
+            if (isFinal) setFinalBuffer((prev) => (prev + " " + txt).trim());
+            else setBuffer(txt);
+          },
+        });
+      }
+    } finally {
+      setIsAsking(false);
     }
   };
 
@@ -318,10 +403,10 @@ export default function VoiceScrumMaster() {
     if (!manualMode) stopListening();
   };
 
-  const recordSnippet = (txt: string) => {
+  const recordSnippet = (txt: string, memberId?: string, memberName?: string) => {
     setQaMap((prev) => {
       const copy = { ...prev };
-      const m = currentMember;
+      const m = memberId && memberName ? { id: memberId, name: memberName } : currentMember;
       if (!m) return copy;
       copy[m.id] = {
         ...copy[m.id],
@@ -334,16 +419,28 @@ export default function VoiceScrumMaster() {
   const handleAnswerFinalize = async () => {
     stopASR();
 
+    // Capture current member info at the start to avoid stale references
+    const currentMemberInfo = currentMember;
+    console.log(`handleAnswerFinalize - currentMember:`, currentMember);
+    console.log(`handleAnswerFinalize - currentMemberInfo:`, currentMemberInfo);
+    if (!currentMemberInfo) return;
+
     const full = (finalBuffer + " " + buffer).trim();
     if (!full) {
-      await speak("I didn't catch that. Could you repeat, or say 'done' to skip?");
+      await speak("I didn't catch that. Could you please repeat your answer, or say 'done' to move to the next person?");
       return;
     }
+    
+    // Check if user wants to skip
+    if (full.toLowerCase().includes('done') || full.toLowerCase().includes('skip')) {
+      await speak(`Thank you, ${currentMemberInfo.name}. Let's move on to the next person.`);
+      // Continue with the flow - don't return, just proceed
+    }
 
-    const memberId = currentMember?.id;
-    if (!memberId) return;
+    const memberId = currentMemberInfo.id;
 
-    recordSnippet(full);
+    // Store the data first
+    recordSnippet(full, currentMemberInfo.id, currentMemberInfo.name);
 
     // save elapsed time
     setQaMap((prev) => {
@@ -357,50 +454,143 @@ export default function VoiceScrumMaster() {
     setQaMap((prev) => {
       const copy = { ...prev };
       const qa = copy[memberId];
-      if (currentQuestion.key === "yesterday") qa.yesterday = (qa.yesterday + " " + full).trim();
-      if (currentQuestion.key === "today") qa.today = (qa.today + " " + full).trim();
-      if (currentQuestion.key === "blockers") qa.blockers = (qa.blockers + " " + full).trim();
+      qa.update = full; // Replace the update, don't append
       return copy;
     });
 
-    // respond with a short acknowledgment
-    const { tasks, blockers } = extractInsights(full, currentMember!.name);
-    if (blockers.length > 0) {
-      await speak(`Thanks ${currentMember!.name}. I heard a blocker: ${blockers[0].issue.slice(0, 80)}.`);
-    } else if (tasks.length > 0) {
-      await speak(`Noted. A key action I captured is: ${tasks[0].title.slice(0, 80)}.`);
-    } else {
-      await speak(`Thanks ${currentMember!.name}. Noted.`);
-    }
+    // Speak acknowledgment BEFORE any state changes
+    console.log(`Speaking acknowledgment for: ${currentMemberInfo.name} (ID: ${currentMemberInfo.id})`);
+    await speak(`Thanks, ${currentMemberInfo.name}.`);
+    
+    // Wait for speech to complete
+    await sleep(500);
 
-    // advance to next question/member
-    const nextQ = qIdx + 1;
-    if (nextQ < DEFAULT_QUESTIONS.length) {
-      setQIdx(nextQ);
+    // Now handle the transition to next person
+    await moveToNextPerson(currentMemberInfo.id);
+  };
+
+  const moveToNextPerson = async (completedMemberId: string) => {
+    console.log(`moveToNextPerson called for member ID: ${completedMemberId}`);
+    console.log(`Current completed members before:`, Array.from(completedMembers));
+    
+    // Mark current member as completed
+    const updatedCompletedMembers = new Set([...completedMembers, completedMemberId]);
+    setCompletedMembers(updatedCompletedMembers);
+    
+    console.log(`Updated completed members:`, Array.from(updatedCompletedMembers));
+
+    // Find next uncompleted member using the updated set
+    const nextUncompletedIndex = team.findIndex(member => !updatedCompletedMembers.has(member.id));
+    console.log(`Next uncompleted index: ${nextUncompletedIndex}`);
+    
+    if (nextUncompletedIndex !== -1) {
+      const nextMember = team[nextUncompletedIndex];
+      console.log(`Moving to next member: ${nextMember.name} (ID: ${nextMember.id})`);
+      
+      setIdx(nextUncompletedIndex);
+      setQIdx(0);
       setBuffer("");
       setFinalBuffer("");
-      await sleep(300);
-      await askCurrent();
+      await sleep(300); // Pause between members
+      
+      // Pass the updated completed members to avoid stale state
+      await askCurrentWithCompletedMembers(updatedCompletedMembers);
     } else {
-      // next member
-      const nextMember = idx + 1;
-      if (nextMember < team.length) {
-        setIdx(nextMember);
-        setQIdx(0);
-        setBuffer("");
-        setFinalBuffer("");
-        await sleep(300);
-        await askCurrent();
-      } else {
-        await completeMeeting();
-      }
+      console.log('No more uncompleted members, ending meeting');
+      await completeMeeting();
     }
+  };
+
+  const askCurrentWithCompletedMembers = async (completedMembersSet: Set<string>) => {
+    // Prevent multiple simultaneous calls
+    if (isAsking) {
+      console.log('Already asking a question, skipping...');
+      return;
+    }
+    
+    setIsAsking(true);
+    
+    try {
+      // Find the next uncompleted member using the passed set
+      const nextUncompletedIndex = team.findIndex(member => !completedMembersSet.has(member.id));
+      if (nextUncompletedIndex === -1) {
+        setIsAsking(false);
+        return completeMeeting();
+      }
+      
+      // Update the current index to the next uncompleted member
+      setIdx(nextUncompletedIndex);
+      
+      const m = team[nextUncompletedIndex];
+      const q = currentQuestion;
+      
+      if (!q) {
+        console.error('No current question found');
+        setIsAsking(false);
+        return;
+      }
+      
+      console.log(`Asking ${m.name} for their update (ID: ${m.id}, idx: ${nextUncompletedIndex})`);
+      console.log(`Using completed members:`, Array.from(completedMembersSet));
+      
+      // Simple question prompt
+      const questionPrompt = `${m.name}, please give your update.`;
+      
+      await speak(questionPrompt);
+      setBuffer("");
+      setFinalBuffer("");
+      setLastChunkAt(Date.now());
+      if (!manualMode && available.asr) {
+        startListening({
+          onText: (txt, isFinal) => {
+            setLastChunkAt(Date.now());
+            if (isFinal) setFinalBuffer((prev) => (prev + " " + txt).trim());
+            else setBuffer(txt);
+          },
+        });
+      }
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  const generateSummaryText = () => {
+    const summary = buildMeetingSummary();
+    let text = `Standup Summary - ${new Date().toLocaleDateString()}\n\n`;
+    
+    summary.participants.forEach((participant) => {
+      text += `• ${participant.name} (${participant.elapsedSec}s):\n`;
+      if (participant.answers.update) {
+        text += `  - Update: ${participant.answers.update}\n`;
+      }
+      if (participant.actions.length > 0) {
+        participant.actions.forEach(action => {
+          text += `  - Action: ${action.title}${action.due ? ` (due ${action.due})` : ''}\n`;
+        });
+      }
+      if (participant.blockers.length > 0) {
+        participant.blockers.forEach(blocker => {
+          text += `  - Blocker: ${blocker.issue}\n`;
+        });
+      }
+      text += '\n';
+    });
+    
+    return text;
+  };
+
+  const sendEmailSummary = () => {
+    const summaryText = generateSummaryText();
+    const subject = `Standup Summary - ${new Date().toLocaleDateString()}`;
+    const body = encodeURIComponent(summaryText);
+    const mailtoLink = `mailto:${emailAddress}?subject=${encodeURIComponent(subject)}&body=${body}`;
+    window.open(mailtoLink);
   };
 
   const completeMeeting = async () => {
     stopASR();
     setActive(false);
-    await speak("Standup complete. Here's the summary.");
+    await speak("Thanks everyone! Standup complete.");
   };
 
   const addMember = () => setTeam((t) => [...t, { id: uuid(), name: "New Teammate" }]);
@@ -431,34 +621,16 @@ export default function VoiceScrumMaster() {
   const buildMeetingSummary = () => {
     const participants = team.map((m) => {
       const qa = qaMap[m.id];
-      const insights = {
-        yesterday: extractInsights(qa?.yesterday || "", m.name),
-        today: extractInsights(qa?.today || "", m.name),
-        blockers: extractInsights(qa?.blockers || "", m.name),
-      };
-
-      const actions = [
-        ...(insights.today.tasks || []),
-        ...(insights.yesterday.tasks || []),
-      ];
-      const blockers = [
-        ...(insights.blockers.blockers || []),
-        ...(insights.today.blockers || []),
-        ...(insights.yesterday.blockers || []),
-      ];
+      const insights = extractInsights(qa?.update || "", m.name);
 
       return {
         name: m.name,
         elapsedSec: qa?.elapsedSec || 0,
-        answers: { yesterday: qa?.yesterday || "", today: qa?.today || "", blockers: qa?.blockers || "" },
+        answers: { update: qa?.update || "" },
         transcript: qa?.transcript || [],
-        actions,
-        blockers,
-        notes: [
-          ...(insights.yesterday.notes || []),
-          ...(insights.today.notes || []),
-          ...(insights.blockers.notes || []),
-        ],
+        actions: insights.tasks || [],
+        blockers: insights.blockers || [],
+        notes: insights.notes || [],
       };
     });
 
@@ -502,7 +674,7 @@ export default function VoiceScrumMaster() {
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white text-slate-800">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <header className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Voice Scrum Master — voice-to-action agent</h1>
+          <h1 className="text-2xl font-bold tracking-tight">AI scrummaster</h1>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="toggle toggle-sm" checked={manualMode} onChange={(e) => setManualMode(e.target.checked)} />
@@ -513,6 +685,76 @@ export default function VoiceScrumMaster() {
             </div>
           </div>
         </header>
+
+        {/* Voice Settings */}
+        <section className="mb-6 bg-white rounded-2xl shadow p-4">
+          <h2 className="font-semibold mb-3">Voice Settings</h2>
+          <div className="grid md:grid-cols-5 gap-4">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Voice</label>
+              <select
+                className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border text-sm"
+                value={voiceSettings.voiceName}
+                onChange={(e) => setVoiceSettings(prev => ({ ...prev, voiceName: e.target.value }))}
+              >
+                <option value="">Auto-select best voice</option>
+                {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((voice, index) => (
+                  <option key={index} value={voice.name}>
+                    {voice.name} ({voice.lang})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Speech Rate</label>
+              <input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value={voiceSettings.rate}
+                onChange={(e) => setVoiceSettings(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
+                className="w-full"
+              />
+              <div className="text-xs text-slate-500 mt-1">{voiceSettings.rate}x</div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Pitch</label>
+              <input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value={voiceSettings.pitch}
+                onChange={(e) => setVoiceSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
+                className="w-full"
+              />
+              <div className="text-xs text-slate-500 mt-1">{voiceSettings.pitch}</div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Volume</label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={voiceSettings.volume}
+                onChange={(e) => setVoiceSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
+                className="w-full"
+              />
+              <div className="text-xs text-slate-500 mt-1">{Math.round(voiceSettings.volume * 100)}%</div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Test Voice</label>
+              <button
+                className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm hover:bg-slate-800"
+                onClick={() => speak("Hello! This is a test of the voice settings. How does this sound?")}
+              >
+                Test Voice
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* ---- Onload video section ---- */}
         <section className="mb-8">
@@ -642,7 +884,7 @@ export default function VoiceScrumMaster() {
                 <div className="text-sm text-slate-600">
                   {active ? (
                     <span>
-                      Speaking with <b>{currentMember?.name}</b> — {currentQuestion?.label} {" "}
+                      Speaking with <b>{currentMember?.name}</b> {" "}
                       <span className="ml-2 text-xs px-2 py-1 rounded bg-black text-white">{perSpeakerTimer}s</span>
                     </span>
                   ) : (
@@ -650,6 +892,31 @@ export default function VoiceScrumMaster() {
                   )}
                 </div>
               </div>
+
+              {/* Progress indicator */}
+              {active && (
+                <div className="mt-3 p-3 bg-slate-50 rounded-xl">
+                  <div className="text-xs text-slate-500 mb-2">Progress</div>
+                  <div className="flex gap-2">
+                    {team.map((member, memberIndex) => (
+                      <div key={member.id} className="flex-1">
+                        <div className={`text-xs font-medium mb-1 ${memberIndex === idx ? 'text-emerald-600' : memberIndex < idx ? 'text-slate-400' : 'text-slate-600'}`}>
+                          {member.name}
+                        </div>
+                        <div className="flex gap-1">
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              completedMembers.has(member.id) || (memberIndex === idx && qIdx >= 0)
+                                ? 'bg-emerald-500'
+                                : 'bg-slate-300'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Live capture area */}
               {active && (
@@ -698,11 +965,7 @@ export default function VoiceScrumMaster() {
             <div className="space-y-3 max-h-[50vh] overflow-auto pr-1">
               {team.map((m) => {
                 const qa = qaMap[m.id];
-                const insightsY = extractInsights(qa?.yesterday || "", m.name);
-                const insightsT = extractInsights(qa?.today || "", m.name);
-                const insightsB = extractInsights(qa?.blockers || "", m.name);
-                const actions = [...insightsT.tasks, ...insightsY.tasks];
-                const blockers = [...insightsB.blockers, ...insightsT.blockers, ...insightsY.blockers];
+                const insights = extractInsights(qa?.update || "", m.name);
                 return (
                   <div key={m.id} className="border rounded-xl p-3">
                     <div className="flex items-center justify-between">
@@ -710,21 +973,27 @@ export default function VoiceScrumMaster() {
                       <div className="text-xs text-slate-500">{qa?.elapsedSec || 0}s</div>
                     </div>
                     <div className="mt-2 text-sm">
-                      {actions.length > 0 && (
+                      {qa?.update && (
+                        <div className="mb-2">
+                          <Icon label="Update" />
+                          <div className="mt-1 text-slate-700">{qa.update}</div>
+                        </div>
+                      )}
+                      {insights.tasks.length > 0 && (
                         <div className="mb-2">
                           <Icon label="Actions" />
                           <ul className="list-disc ml-8 mt-1 space-y-1">
-                            {actions.map((a, i) => (
+                            {insights.tasks.map((a, i) => (
                               <li key={i}>{a.title}{a.due ? ` (due ${a.due})` : ""}</li>
                             ))}
                           </ul>
                         </div>
                       )}
-                      {blockers.length > 0 && (
+                      {insights.blockers.length > 0 && (
                         <div className="mb-2">
                           <Icon label="Blockers" />
                           <ul className="list-disc ml-8 mt-1 space-y-1">
-                            {blockers.map((b, i) => (
+                            {insights.blockers.map((b, i) => (
                               <li key={i}>{b.issue}</li>
                             ))}
                           </ul>
@@ -745,6 +1014,13 @@ export default function VoiceScrumMaster() {
             </div>
 
             <div className="mt-4 space-y-2">
+              <label className="block text-xs text-slate-500">Email Address</label>
+              <input
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 border"
+                placeholder="Enter email address"
+                value={emailAddress}
+                onChange={(e) => setEmailAddress(e.target.value)}
+              />
               <label className="block text-xs text-slate-500">Slack Incoming Webhook (optional)</label>
               <input
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 border"
@@ -753,14 +1029,9 @@ export default function VoiceScrumMaster() {
                 onChange={(e) => setSlackWebhook(e.target.value)}
               />
               <div className="flex gap-2 mt-2">
+                <button className="px-3 py-1.5 rounded bg-emerald-600 text-white" onClick={sendEmailSummary}>Email Summary</button>
                 <button className="px-3 py-1.5 rounded bg-slate-900 text-white" onClick={postToSlack}>Post to Slack</button>
                 <button className="px-3 py-1.5 rounded bg-white border" onClick={exportJSON}>Export JSON</button>
-                <a
-                  className="px-3 py-1.5 rounded bg-white border"
-                  href={`mailto:?subject=Standup%20Summary&body=${encodeURIComponent(JSON.stringify(meetingSummary, null, 2))}`}
-                >
-                  Email summary
-                </a>
               </div>
             </div>
           </aside>
