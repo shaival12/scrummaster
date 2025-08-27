@@ -130,6 +130,16 @@ function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number;
         }
       }
       
+      // Try to find Amira voice first (default preference)
+      if (!selectedVoice || selectedVoice === voices[0]) {
+        const amiraVoice = voices.find(voice => 
+          voice.name.toLowerCase().includes('amira')
+        );
+        if (amiraVoice) {
+          selectedVoice = amiraVoice;
+        }
+      }
+      
       // Fallback to best available English voice
       if (!selectedVoice || !selectedVoice.lang.startsWith('en')) {
         selectedVoice = voices.find(voice => 
@@ -235,8 +245,9 @@ export default function VoiceScrumMaster() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const teamSectionRef = useRef<HTMLDivElement | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>(DEFAULT_VIDEO_URL);
-  const [videoMuted, setVideoMuted] = useState<boolean>(true);
+  const [videoMuted, setVideoMuted] = useState<boolean>(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState<boolean>(true);
+  const [autoStartStandup, setAutoStartStandup] = useState<boolean>(false);
 
   // Standup state
   const [manualMode, setManualMode] = useState(false);
@@ -246,15 +257,27 @@ export default function VoiceScrumMaster() {
     rate: 0.9,
     pitch: 1.1,
     volume: 0.95,
-    voiceName: ""
+    voiceName: "Amira"
   });
   
   const { speak, startListening, stopListening, listening, available } = useSpeech(voiceSettings);
-  const [team, setTeam] = useState<Member[]>([
-    { id: uuid(), name: "Josh" },
-    { id: uuid(), name: "Katie" },
-    { id: uuid(), name: "Naomi" },
-  ]);
+  const [team, setTeam] = useState<Member[]>(() => {
+    // Load team from localStorage on initial load
+    try {
+      const savedTeam = localStorage.getItem('scrummaster-team');
+      if (savedTeam) {
+        return JSON.parse(savedTeam);
+      }
+    } catch (error) {
+      console.warn('Failed to load team from localStorage:', error);
+    }
+    // Default team if no saved data
+    return [
+      { id: uuid(), name: "Josh" },
+      { id: uuid(), name: "Katie" },
+      { id: uuid(), name: "Naomi" },
+    ];
+  });
   const [active, setActive] = useState(false);
   const [idx, setIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
@@ -593,8 +616,36 @@ export default function VoiceScrumMaster() {
     await speak("Thanks everyone! Standup complete.");
   };
 
-  const addMember = () => setTeam((t) => [...t, { id: uuid(), name: "New Teammate" }]);
-  const removeMember = (id: string) => setTeam((t) => t.filter((m) => m.id !== id));
+  const saveTeamToStorage = (newTeam: Member[]) => {
+    try {
+      localStorage.setItem('scrummaster-team', JSON.stringify(newTeam));
+      console.log('Team saved to localStorage');
+    } catch (error) {
+      console.warn('Failed to save team to localStorage:', error);
+    }
+  };
+
+  const resetTeamToDefault = () => {
+    const defaultTeam = [
+      { id: uuid(), name: "Josh" },
+      { id: uuid(), name: "Katie" },
+      { id: uuid(), name: "Naomi" },
+    ];
+    setTeam(defaultTeam);
+    saveTeamToStorage(defaultTeam);
+  };
+
+  const addMember = () => setTeam((t) => {
+    const newTeam = [...t, { id: uuid(), name: "New Teammate" }];
+    saveTeamToStorage(newTeam);
+    return newTeam;
+  });
+
+  const removeMember = (id: string) => setTeam((t) => {
+    const newTeam = t.filter((m) => m.id !== id);
+    saveTeamToStorage(newTeam);
+    return newTeam;
+  });
 
   const move = (i: number, dir: -1 | 1) => {
     setTeam((t) => {
@@ -603,6 +654,7 @@ export default function VoiceScrumMaster() {
       if (j < 0 || j >= arr.length) return arr;
       const [m] = arr.splice(i, 1);
       arr.splice(j, 0, m);
+      saveTeamToStorage(arr);
       return arr;
     });
   };
@@ -768,7 +820,15 @@ export default function VoiceScrumMaster() {
                 muted={videoMuted}
                 playsInline
                 controls
-                onEnded={scrollToTeam}
+                onEnded={() => {
+                  scrollToTeam();
+                  if (autoStartStandup && !active) {
+                    // Auto-start standup after a short delay
+                    setTimeout(() => {
+                      kickoff();
+                    }, 1000);
+                  }
+                }}
                 onLoadedData={() => {
                   if (autoPlayVideo) {
                     const v = videoRef.current;
@@ -805,9 +865,14 @@ export default function VoiceScrumMaster() {
 
             <div className="p-3 border-t flex flex-col md:flex-row gap-2 md:items-center">
               <div className="text-sm text-slate-600 flex-1">Video autoplays on load; when it ends, we'll scroll to the Team section below.</div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={autoPlayVideo} onChange={(e) => setAutoPlayVideo(e.target.checked)} /> Autoplay on load
-              </label>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={autoPlayVideo} onChange={(e) => setAutoPlayVideo(e.target.checked)} /> Autoplay on load
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={autoStartStandup} onChange={(e) => setAutoStartStandup(e.target.checked)} /> Auto-start standup when video ends
+                </label>
+              </div>
               <div className="flex gap-2">
                 <input
                   className="px-3 py-1.5 rounded-xl bg-slate-50 border text-sm w-[320px]"
@@ -827,13 +892,23 @@ export default function VoiceScrumMaster() {
             <div className="bg-white rounded-2xl shadow p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-semibold">Team</h2>
-                <button
-                  className="px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800"
-                  onClick={addMember}
-                  disabled={active}
-                >
-                  + Add member
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800"
+                    onClick={addMember}
+                    disabled={active}
+                  >
+                    + Add member
+                  </button>
+                  <button
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    onClick={resetTeamToDefault}
+                    disabled={active}
+                    title="Reset to default team"
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
 
               <ul className="space-y-2">
@@ -843,7 +918,11 @@ export default function VoiceScrumMaster() {
                       <input
                         value={m.name}
                         disabled={active}
-                        onChange={(e) => setTeam((t) => t.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x)))}
+                        onChange={(e) => setTeam((t) => {
+                          const newTeam = t.map((x) => (x.id === m.id ? { ...x, name: e.target.value } : x));
+                          saveTeamToStorage(newTeam);
+                          return newTeam;
+                        })}
                         className="bg-transparent outline-none w-full"
                       />
                     </div>
