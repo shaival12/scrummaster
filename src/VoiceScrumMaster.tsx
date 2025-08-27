@@ -35,7 +35,7 @@ const nowISO = () => new Date().toISOString();
 
 // Default video location (you can change it via the input under the player)
 // If you're hosting this elsewhere, point to a publicly reachable URL.
-const DEFAULT_VIDEO_URL = "/rendered_video.mp4"; // uploaded in this session
+const DEFAULT_VIDEO_URL = "/ai_nicole.mp4"; // uploaded in this session
 
 // Safe uuid helper (fallback if crypto.randomUUID is unavailable)
 const uuid = () =>
