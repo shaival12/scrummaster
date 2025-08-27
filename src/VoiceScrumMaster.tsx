@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Voice Scrum Master — a voice-to-action AI standup facilitator
@@ -665,7 +665,7 @@ export default function VoiceScrumMaster() {
                         <div className="opacity-60">{buffer || <em>…</em>}</div>
                       </div>
                       <div className="mt-2 flex gap-2">
-                        <button className="px-3 py-1.5 rounded bg-white border" onClick={() => setBuffer("") || setFinalBuffer("")}>Clear</button>
+                        <button className="px-3 py-1.5 rounded bg-white border" onClick={() => { setBuffer(""); setFinalBuffer(""); }}>Clear</button>
                         <button className="px-3 py-1.5 rounded bg-emerald-600 text-white" onClick={handleAnswerFinalize}>Done</button>
                       </div>
                     </div>
