@@ -228,7 +228,7 @@ function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number;
 
 // ---------- Component ----------
 
-type Member = { id: string; name: string };
+type Member = { id: string; name: string; timeLimit: number };
 
 type QA = {
   update: string;
@@ -266,16 +266,21 @@ export default function VoiceScrumMaster() {
     try {
       const savedTeam = localStorage.getItem('scrummaster-team');
       if (savedTeam) {
-        return JSON.parse(savedTeam);
+        const parsedTeam = JSON.parse(savedTeam);
+        // Ensure all members have timeLimit property (for backward compatibility)
+        return parsedTeam.map((member: any) => ({
+          ...member,
+          timeLimit: member.timeLimit || 60 // Default to 60 seconds if not set
+        }));
       }
     } catch (error) {
       console.warn('Failed to load team from localStorage:', error);
     }
     // Default team if no saved data
     return [
-      { id: uuid(), name: "Josh" },
-      { id: uuid(), name: "Katie" },
-      { id: uuid(), name: "Naomi" },
+      { id: uuid(), name: "Josh", timeLimit: 60 },
+      { id: uuid(), name: "Katie", timeLimit: 60 },
+      { id: uuid(), name: "Naomi", timeLimit: 60 },
     ];
   });
   const [active, setActive] = useState(false);
@@ -291,6 +296,7 @@ export default function VoiceScrumMaster() {
   const [perSpeakerTimer, setPerSpeakerTimer] = useState<number>(0);
   const perSpeakerRef = useRef<number>(0);
   const perSpeakerInterval = useRef<any>(null);
+  const [timeLimitReached, setTimeLimitReached] = useState<boolean>(false);
 
   const currentMember = team[idx];
   const currentQuestion = DEFAULT_QUESTIONS[qIdx];
@@ -336,12 +342,23 @@ export default function VoiceScrumMaster() {
     if (perSpeakerInterval.current) clearInterval(perSpeakerInterval.current);
     perSpeakerRef.current = 0;
     setPerSpeakerTimer(0);
+    setTimeLimitReached(false);
     perSpeakerInterval.current = setInterval(() => {
       perSpeakerRef.current += 1;
       setPerSpeakerTimer(perSpeakerRef.current);
+      
+      // Check if time limit reached
+      if (perSpeakerRef.current >= currentMember.timeLimit) {
+        setTimeLimitReached(true);
+        clearInterval(perSpeakerInterval.current);
+        // Auto-finalize after time limit
+        setTimeout(() => {
+          handleAnswerFinalize();
+        }, 1000); // Give 1 second grace period
+      }
     }, 1000);
     return () => clearInterval(perSpeakerInterval.current);
-  }, [active, idx]);
+  }, [active, idx, currentMember]);
 
   // ---------- Auto-advance on silence ----------
   useEffect(() => {
@@ -449,21 +466,24 @@ export default function VoiceScrumMaster() {
     if (!currentMemberInfo) return;
 
     const full = (finalBuffer + " " + buffer).trim();
-    if (!full) {
+    const isTimeLimitReached = timeLimitReached;
+    
+    // If time limit reached, proceed even with empty input
+    if (!full && !isTimeLimitReached) {
       await speak("I didn't catch that. Could you please repeat your answer, or say 'done' to move to the next person?");
       return;
     }
     
-    // Check if user wants to skip
-    if (full.toLowerCase().includes('done') || full.toLowerCase().includes('skip')) {
+    // Check if user wants to skip (only if not time limit reached)
+    if (!isTimeLimitReached && full.toLowerCase().includes('done') || full.toLowerCase().includes('skip')) {
       await speak(`Thank you, ${currentMemberInfo.name}. Let's move on to the next person.`);
       // Continue with the flow - don't return, just proceed
     }
 
     const memberId = currentMemberInfo.id;
 
-    // Store the data first
-    recordSnippet(full, currentMemberInfo.id, currentMemberInfo.name);
+    // Store the data first (even if empty due to time limit)
+    recordSnippet(full || "No response (time limit reached)", currentMemberInfo.id, currentMemberInfo.name);
 
     // save elapsed time
     setQaMap((prev) => {
@@ -477,7 +497,7 @@ export default function VoiceScrumMaster() {
     setQaMap((prev) => {
       const copy = { ...prev };
       const qa = copy[memberId];
-      qa.update = full; // Replace the update, don't append
+      qa.update = full || "No response (time limit reached)"; // Replace the update, don't append
       return copy;
     });
 
@@ -627,16 +647,16 @@ export default function VoiceScrumMaster() {
 
   const resetTeamToDefault = () => {
     const defaultTeam = [
-      { id: uuid(), name: "Josh" },
-      { id: uuid(), name: "Katie" },
-      { id: uuid(), name: "Naomi" },
+      { id: uuid(), name: "Josh", timeLimit: 60 },
+      { id: uuid(), name: "Katie", timeLimit: 60 },
+      { id: uuid(), name: "Naomi", timeLimit: 60 },
     ];
     setTeam(defaultTeam);
     saveTeamToStorage(defaultTeam);
   };
 
   const addMember = () => setTeam((t) => {
-    const newTeam = [...t, { id: uuid(), name: "New Teammate" }];
+    const newTeam = [...t, { id: uuid(), name: "New Teammate", timeLimit: 60 }];
     saveTeamToStorage(newTeam);
     return newTeam;
   });
@@ -891,7 +911,12 @@ export default function VoiceScrumMaster() {
           <div className="md:col-span-2">
             <div className="bg-white rounded-2xl shadow p-4">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold">Team</h2>
+                <div>
+                  <h2 className="font-semibold">Team</h2>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Set time limits for each member (30s - 5m)
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <button
                     className="px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800"
@@ -925,6 +950,26 @@ export default function VoiceScrumMaster() {
                         })}
                         className="bg-transparent outline-none w-full"
                       />
+                    </div>
+                    <div className="text-xs text-slate-500">time</div>
+                    <div className="w-20">
+                      <select
+                        value={m.timeLimit}
+                        disabled={active}
+                        onChange={(e) => setTeam((t) => {
+                          const newTeam = t.map((x) => (x.id === m.id ? { ...x, timeLimit: parseInt(e.target.value) } : x));
+                          saveTeamToStorage(newTeam);
+                          return newTeam;
+                        })}
+                        className="w-full px-2 py-1 rounded bg-white border text-xs"
+                      >
+                        <option value={30}>30s</option>
+                        <option value={60}>1m</option>
+                        <option value={90}>1.5m</option>
+                        <option value={120}>2m</option>
+                        <option value={180}>3m</option>
+                        <option value={300}>5m</option>
+                      </select>
                     </div>
                     <div className="text-xs text-slate-500">order</div>
                     <div className="flex gap-1">
@@ -964,7 +1009,13 @@ export default function VoiceScrumMaster() {
                   {active ? (
                     <span>
                       Speaking with <b>{currentMember?.name}</b> {" "}
-                      <span className="ml-2 text-xs px-2 py-1 rounded bg-black text-white">{perSpeakerTimer}s</span>
+                      <span className={`ml-2 text-xs px-2 py-1 rounded ${
+                        timeLimitReached 
+                          ? 'bg-red-500 text-white' 
+                          : 'bg-black text-white'
+                      }`}>
+                        {perSpeakerTimer}s / {currentMember?.timeLimit}s
+                      </span>
                     </span>
                   ) : (
                     <span>Ready</span>
@@ -993,6 +1044,15 @@ export default function VoiceScrumMaster() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Time limit reached notification */}
+              {active && timeLimitReached && (
+                <div className="mt-3 p-3 rounded-xl bg-red-100 border border-red-300">
+                  <div className="text-sm text-red-700 font-medium">
+                    ⏰ Time's up! Moving to next person...
                   </div>
                 </div>
               )}
