@@ -297,9 +297,35 @@ export default function VoiceScrumMaster() {
   const perSpeakerRef = useRef<number>(0);
   const perSpeakerInterval = useRef<any>(null);
   const [timeLimitReached, setTimeLimitReached] = useState<boolean>(false);
+  const [timerStarted, setTimerStarted] = useState<boolean>(false);
 
   const currentMember = team[idx];
   const currentQuestion = DEFAULT_QUESTIONS[qIdx];
+
+  // Helper function to start timer for a member
+  const startMemberTimer = (member: Member) => {
+    if (perSpeakerInterval.current) {
+      clearInterval(perSpeakerInterval.current);
+      perSpeakerInterval.current = null;
+    }
+    
+    console.log(`Starting timer for ${member.name}`);
+    perSpeakerInterval.current = setInterval(() => {
+      perSpeakerRef.current += 1;
+      setPerSpeakerTimer(perSpeakerRef.current);
+      
+      // Check if time limit reached
+      if (perSpeakerRef.current >= member.timeLimit) {
+        setTimeLimitReached(true);
+        clearInterval(perSpeakerInterval.current);
+        perSpeakerInterval.current = null;
+        // Auto-finalize after time limit
+        setTimeout(() => {
+          handleAnswerFinalize();
+        }, 1000); // Give 1 second grace period
+      }
+    }, 1000);
+  };
 
   // ---------- VIDEO: autoplay on load, scroll to team on end ----------
   useEffect(() => {
@@ -339,25 +365,7 @@ export default function VoiceScrumMaster() {
   useEffect(() => {
     if (!active) return;
     if (!currentMember) return;
-    if (perSpeakerInterval.current) clearInterval(perSpeakerInterval.current);
-    perSpeakerRef.current = 0;
-    setPerSpeakerTimer(0);
-    setTimeLimitReached(false);
-    perSpeakerInterval.current = setInterval(() => {
-      perSpeakerRef.current += 1;
-      setPerSpeakerTimer(perSpeakerRef.current);
-      
-      // Check if time limit reached
-      if (perSpeakerRef.current >= currentMember.timeLimit) {
-        setTimeLimitReached(true);
-        clearInterval(perSpeakerInterval.current);
-        // Auto-finalize after time limit
-        setTimeout(() => {
-          handleAnswerFinalize();
-        }, 1000); // Give 1 second grace period
-      }
-    }, 1000);
-    return () => clearInterval(perSpeakerInterval.current);
+    // Don't start timer here - it will be started in askCurrent when the AI asks the question
   }, [active, idx, currentMember]);
 
   // ---------- Auto-advance on silence ----------
@@ -387,6 +395,7 @@ export default function VoiceScrumMaster() {
   };
 
   const askCurrent = async () => {
+    // FIRST ASK CURRENT FUNCTION
     // Prevent multiple simultaneous calls
     if (isAsking) {
       console.log('Already asking a question, skipping...');
@@ -425,12 +434,24 @@ export default function VoiceScrumMaster() {
       setBuffer("");
       setFinalBuffer("");
       setLastChunkAt(Date.now());
+      
+      // Initialize timer but don't start counting yet
+      if (perSpeakerInterval.current) clearInterval(perSpeakerInterval.current);
+      perSpeakerRef.current = 0;
+      setPerSpeakerTimer(0);
+      setTimeLimitReached(false);
+      
       if (!manualMode && available.asr) {
         startListening({
           onText: (txt, isFinal) => {
             setLastChunkAt(Date.now());
             if (isFinal) setFinalBuffer((prev) => (prev + " " + txt).trim());
             else setBuffer(txt);
+            
+            // Start the timer when the member first starts speaking
+            if (txt.trim().length > 0 && !perSpeakerInterval.current) {
+              startMemberTimer(m);
+            }
           },
         });
       }
@@ -458,6 +479,13 @@ export default function VoiceScrumMaster() {
 
   const handleAnswerFinalize = async () => {
     stopASR();
+    
+    // Clear the timer interval to ensure it's reset for the next person
+    if (perSpeakerInterval.current) {
+      clearInterval(perSpeakerInterval.current);
+      perSpeakerInterval.current = null;
+      console.log('Timer interval cleared in handleAnswerFinalize');
+    }
 
     // Capture current member info at the start to avoid stale references
     const currentMemberInfo = currentMember;
@@ -467,6 +495,7 @@ export default function VoiceScrumMaster() {
 
     const full = (finalBuffer + " " + buffer).trim();
     const isTimeLimitReached = timeLimitReached;
+    const finalTimerValue = perSpeakerTimer; // Capture the current timer value
     
     // If time limit reached, proceed even with empty input
     if (!full && !isTimeLimitReached) {
@@ -489,9 +518,13 @@ export default function VoiceScrumMaster() {
     setQaMap((prev) => {
       const copy = { ...prev };
       const qa = copy[memberId];
-      qa.elapsedSec += perSpeakerRef.current;
+      qa.elapsedSec += finalTimerValue; // Use the captured timer value
+      console.log(`Saving elapsed time for ${currentMemberInfo.name}: ${finalTimerValue}s`);
       return copy;
     });
+    
+    // Reset timer state for next member
+    setPerSpeakerTimer(0);
 
     // map to the current QA field
     setQaMap((prev) => {
@@ -583,12 +616,24 @@ export default function VoiceScrumMaster() {
       setBuffer("");
       setFinalBuffer("");
       setLastChunkAt(Date.now());
+      
+      // Initialize timer but don't start counting yet
+      if (perSpeakerInterval.current) clearInterval(perSpeakerInterval.current);
+      perSpeakerRef.current = 0;
+      setPerSpeakerTimer(0);
+      setTimeLimitReached(false);
+      
       if (!manualMode && available.asr) {
         startListening({
           onText: (txt, isFinal) => {
             setLastChunkAt(Date.now());
             if (isFinal) setFinalBuffer((prev) => (prev + " " + txt).trim());
             else setBuffer(txt);
+            
+            // Start the timer when the member first starts speaking
+            if (txt.trim().length > 0 && !perSpeakerInterval.current) {
+              startMemberTimer(m);
+            }
           },
         });
       }
