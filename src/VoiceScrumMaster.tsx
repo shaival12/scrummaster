@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from "react";
  *
  * Tips:
  *  - Works best in Chrome/Edge on desktop over HTTPS (mic permissions).
- *  - If speech recognition is unavailable, toggle "Manual input".
+ *  - If speech recognition is navailable, toggle "Manual input".
  *  - Configure a Slack Incoming Webhook if you want to post the summary.
  */
 
