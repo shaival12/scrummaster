@@ -905,6 +905,15 @@ export default function VoiceScrumMaster() {
                 muted={videoMuted}
                 playsInline
                 controls
+                onError={(e) => {
+                  console.warn('Video failed to load:', e);
+                  // Fallback to a different video if the current one fails
+                  if (videoUrl === "/rendered_video.mp4") {
+                    setVideoUrl("/ai_nicole.mp4");
+                  } else if (videoUrl === "/ai_nicole.mp4") {
+                    setVideoUrl("/rendered_video.mp4");
+                  }
+                }}
                 onEnded={() => {
                   scrollToTeam();
                   if (autoStartStandup && !active) {
@@ -949,7 +958,11 @@ export default function VoiceScrumMaster() {
             </div>
 
             <div className="p-3 border-t flex flex-col md:flex-row gap-2 md:items-center">
-              <div className="text-sm text-slate-600 flex-1">Video autoplays on load; when it ends, we'll scroll to the Team section below.</div>
+              <div className="text-sm text-slate-600 flex-1">
+                Video autoplays on load; when it ends, we'll scroll to the Team section below.
+                {videoUrl.includes('ai_nicole') && <span className="text-orange-600 ml-2">(Using AI Nicole video)</span>}
+                {videoUrl.includes('rendered_video') && <span className="text-blue-600 ml-2">(Using rendered video)</span>}
+              </div>
               <div className="flex flex-col gap-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={autoPlayVideo} onChange={(e) => setAutoPlayVideo(e.target.checked)} /> Autoplay on load
