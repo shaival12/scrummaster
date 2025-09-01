@@ -302,16 +302,26 @@ export default function VoiceScrumMaster() {
   const currentMember = team[idx];
   const currentQuestion = DEFAULT_QUESTIONS[qIdx];
 
+  // Helper function to reset timer state
+  const resetTimerState = () => {
+    if (perSpeakerInterval.current) {
+      clearInterval(perSpeakerInterval.current);
+      perSpeakerInterval.current = null;
+    }
+    perSpeakerRef.current = 0;
+    setPerSpeakerTimer(0);
+    setTimeLimitReached(false);
+    setTimerStarted(false);
+  };
+
   // Helper function to start timer for a member
   const startMemberTimer = (member: Member) => {
-    // Prevent multiple timer starts for the same speaker
-    if (timerStarted || perSpeakerInterval.current) {
-      console.log(`Timer already started for ${member.name}, skipping...`);
-      return;
-    }
+    // Clear any existing timer first
+    resetTimerState();
     
     console.log(`Starting timer for ${member.name}`);
     setTimerStarted(true);
+    
     perSpeakerInterval.current = setInterval(() => {
       perSpeakerRef.current += 1;
       setPerSpeakerTimer(perSpeakerRef.current);
@@ -369,6 +379,16 @@ export default function VoiceScrumMaster() {
     if (!currentMember) return;
     // Don't start timer here - it will be started in askCurrent when the AI asks the question
   }, [active, idx, currentMember]);
+
+  // ---------- Cleanup timer on unmount or meeting end ----------
+  useEffect(() => {
+    return () => {
+      if (perSpeakerInterval.current) {
+        clearInterval(perSpeakerInterval.current);
+        perSpeakerInterval.current = null;
+      }
+    };
+  }, []);
 
   // ---------- Auto-advance on silence ----------
   useEffect(() => {
@@ -437,15 +457,8 @@ export default function VoiceScrumMaster() {
       setFinalBuffer("");
       setLastChunkAt(Date.now());
       
-      // Initialize timer but don't start counting yet
-      if (timerStarted || perSpeakerInterval.current) {
-        clearInterval(perSpeakerInterval.current);
-        perSpeakerInterval.current = null;
-      }
-      perSpeakerRef.current = 0;
-      setPerSpeakerTimer(0);
-      setTimeLimitReached(false);
-      setTimerStarted(false);
+      // Reset timer state for new speaker
+      resetTimerState();
       
       if (!manualMode && available.asr) {
         startListening({
@@ -455,7 +468,7 @@ export default function VoiceScrumMaster() {
             else setBuffer(txt);
             
             // Start the timer when the member first starts speaking
-            if (txt.trim().length > 0 && !timerStarted) {
+            if (txt.trim().length > 0 && !timerStarted && !perSpeakerInterval.current) {
               startMemberTimer(m);
             }
           },
@@ -487,7 +500,7 @@ export default function VoiceScrumMaster() {
     stopASR();
     
     // Clear the timer interval to ensure it's reset for the next person
-    if (timerStarted || perSpeakerInterval.current) {
+    if (perSpeakerInterval.current) {
       clearInterval(perSpeakerInterval.current);
       perSpeakerInterval.current = null;
       console.log('Timer interval cleared in handleAnswerFinalize');
@@ -524,14 +537,13 @@ export default function VoiceScrumMaster() {
     setQaMap((prev) => {
       const copy = { ...prev };
       const qa = copy[memberId];
-      qa.elapsedSec += finalTimerValue; // Use the captured timer value
+      qa.elapsedSec = finalTimerValue; // Set to actual time spent, don't accumulate
       console.log(`Saving elapsed time for ${currentMemberInfo.name}: ${finalTimerValue}s`);
       return copy;
     });
     
     // Reset timer state for next member
-    setPerSpeakerTimer(0);
-    setTimerStarted(false);
+    resetTimerState();
 
     // map to the current QA field
     setQaMap((prev) => {
@@ -624,15 +636,8 @@ export default function VoiceScrumMaster() {
       setFinalBuffer("");
       setLastChunkAt(Date.now());
       
-      // Initialize timer but don't start counting yet
-      if (timerStarted || perSpeakerInterval.current) {
-        clearInterval(perSpeakerInterval.current);
-        perSpeakerInterval.current = null;
-      }
-      perSpeakerRef.current = 0;
-      setPerSpeakerTimer(0);
-      setTimeLimitReached(false);
-      setTimerStarted(false);
+      // Reset timer state for new speaker
+      resetTimerState();
       
       if (!manualMode && available.asr) {
         startListening({
@@ -642,7 +647,7 @@ export default function VoiceScrumMaster() {
             else setBuffer(txt);
             
             // Start the timer when the member first starts speaking
-            if (txt.trim().length > 0 && !timerStarted) {
+            if (txt.trim().length > 0 && !timerStarted && !perSpeakerInterval.current) {
               startMemberTimer(m);
             }
           },
@@ -688,10 +693,11 @@ export default function VoiceScrumMaster() {
 
   const completeMeeting = async () => {
     stopASR();
+    
+    // Clear any running timer
+    resetTimerState();
+    
     setActive(false);
-    setTimerStarted(false);
-    setPerSpeakerTimer(0);
-    setTimeLimitReached(false);
     await speak("Thanks everyone! Standup complete.");
   };
 
