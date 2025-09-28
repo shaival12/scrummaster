@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useAuth } from "./contexts/AuthContext";
 
 /**
  * Voice Scrum Master — a voice-to-action AI standup facilitator
@@ -242,8 +241,6 @@ const DEFAULT_QUESTIONS = [
 ] as const;
 
 export default function VoiceScrumMaster() {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  
   // Video controls
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const teamSectionRef = useRef<HTMLDivElement | null>(null);
@@ -809,56 +806,12 @@ export default function VoiceScrumMaster() {
 
 
 
-  // Show loading state while checking authentication
-  if (isLoading) {
-    return (
-      <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white text-slate-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <h2 className="text-xl font-semibold text-gray-900">Loading...</h2>
-          <p className="text-gray-600">Checking authentication status</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show authentication required message if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white text-slate-800 flex items-center justify-center">
-        <div className="max-w-md w-full text-center">
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Authentication Required</h2>
-            <p className="text-gray-600 mb-6">
-              Please sign in with your Zoom account to access the Voice Scrum Master features.
-            </p>
-            <p className="text-sm text-gray-500">
-              The authentication button should appear above this message.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ---------- UI ----------
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-white text-slate-800">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <header className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">AI scrummaster</h1>
-            {user && (
-              <p className="text-sm text-gray-600 mt-1">
-                Welcome, {user.display_name || `${user.first_name} ${user.last_name}`}
-              </p>
-            )}
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight">AI scrummaster</h1>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="toggle toggle-sm" checked={manualMode} onChange={(e) => setManualMode(e.target.checked)} />
@@ -880,7 +833,6 @@ export default function VoiceScrumMaster() {
                 className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border text-sm"
                 value={voiceSettings.voiceName}
                 onChange={(e) => setVoiceSettings(prev => ({ ...prev, voiceName: e.target.value }))}
-                aria-label="Select voice"
               >
                 <option value="">Auto-select best voice</option>
                 {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((voice, index) => (
@@ -900,7 +852,6 @@ export default function VoiceScrumMaster() {
                 value={voiceSettings.rate}
                 onChange={(e) => setVoiceSettings(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
                 className="w-full"
-                aria-label="Speech rate"
               />
               <div className="text-xs text-slate-500 mt-1">{voiceSettings.rate}x</div>
             </div>
@@ -914,7 +865,6 @@ export default function VoiceScrumMaster() {
                 value={voiceSettings.pitch}
                 onChange={(e) => setVoiceSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
                 className="w-full"
-                aria-label="Voice pitch"
               />
               <div className="text-xs text-slate-500 mt-1">{voiceSettings.pitch}</div>
             </div>
@@ -928,7 +878,6 @@ export default function VoiceScrumMaster() {
                 value={voiceSettings.volume}
                 onChange={(e) => setVoiceSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
                 className="w-full"
-                aria-label="Voice volume"
               />
               <div className="text-xs text-slate-500 mt-1">{Math.round(voiceSettings.volume * 100)}%</div>
             </div>
@@ -1091,7 +1040,6 @@ export default function VoiceScrumMaster() {
                           return newTeam;
                         })}
                         className="w-full px-2 py-1 rounded bg-white border text-xs"
-                        aria-label={`Time limit for ${m.name}`}
                       >
                         <option value={30}>30s</option>
                         <option value={60}>1m</option>
