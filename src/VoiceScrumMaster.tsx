@@ -854,6 +854,7 @@ export default function VoiceScrumMaster() {
       };
     });
 
+    
     const flatActions = participants.flatMap((p) => p.actions.map((a) => ({ ...a, owner: p.name })));
     const flatBlockers = participants.flatMap((p) => p.blockers.map((b) => ({ ...b, owner: p.name })));
 
