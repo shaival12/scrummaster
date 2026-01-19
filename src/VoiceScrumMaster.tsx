@@ -94,6 +94,87 @@ function extractInsights(text: string, owner: string) {
   return { tasks, blockers, notes };
 }
 
+// ---------- Voice filtering and ranking ----------
+// Note: Web Speech API only supports system voices. Custom celebrity voices (Trump, Arnold, Elon) 
+// are not available, but we optimize for the most natural-sounding voices available.
+function getBestVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
+  // Filter to English voices only
+  const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+  
+  // Priority keywords for natural-sounding voices (premium/neural voices)
+  const premiumKeywords = [
+    'premium', 'natural', 'enhanced', 'neural', 'wave', 'cloud', 
+    'google', 'amazon', 'microsoft', 'siri', 'alexa', 'cortana',
+    'samantha', 'victoria', 'karen', 'fiona', 'tessa', 'zira', 'susan',
+    'daniel', 'alex', 'fred', 'ralph', 'tom', 'bruce', 'lee', 'reed',
+    'kate', 'jill', 'melissa', 'samantha', 'monica', 'linda'
+  ];
+  
+  // Keywords to avoid (robotic/low-quality voices)
+  const avoidKeywords = ['system', 'basic', 'compact', 'low', 'robotic', 'novelty'];
+  
+  // Score and rank voices
+  const scoredVoices = englishVoices.map(voice => {
+    let score = 0;
+    const nameLower = voice.name.toLowerCase();
+    
+    // Premium/natural voices get highest scores
+    premiumKeywords.forEach(keyword => {
+      if (nameLower.includes(keyword)) {
+        score += 15; // Increased weight for premium voices
+      }
+    });
+    
+    // Strongly avoid robotic voices
+    avoidKeywords.forEach(keyword => {
+      if (nameLower.includes(keyword)) {
+        score -= 30; // Heavily penalize robotic voices
+      }
+    });
+    
+    // Prefer female voices (often sound more natural and clear)
+    const femaleNames = ['samantha', 'victoria', 'karen', 'fiona', 'tessa', 'zira', 
+                         'susan', 'kate', 'jill', 'melissa', 'monica', 'linda', 
+                         'shelley', 'sara', 'tessa', 'veena', 'yuna'];
+    if (voice.name.toLowerCase().includes('female') || 
+        femaleNames.some(name => nameLower.includes(name))) {
+      score += 8; // Increased preference for natural female voices
+    }
+    
+    // Prefer certain male voices that sound natural
+    const maleNames = ['daniel', 'alex', 'fred', 'tom', 'bruce', 'ralph', 'lee', 'reed', 'aaron'];
+    if (maleNames.some(name => nameLower.includes(name))) {
+      score += 5;
+    }
+    
+    // Prefer voices with "US" locale (better pronunciation)
+    if (voice.lang.includes('US')) {
+      score += 3;
+    }
+    
+    // Prefer default voices (usually best quality)
+    if (voice.default) {
+      score += 2;
+    }
+    
+    // Prefer voices with longer names (often indicates premium versions)
+    if (voice.name.length > 15) {
+      score += 1;
+    }
+    
+    return { voice, score };
+  });
+  
+  // Sort by score (highest first) and take top 20
+  const topVoices = scoredVoices
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20)
+    .map(item => item.voice);
+  
+  // If we have fewer than 20, return what we have
+  return topVoices.length > 0 ? topVoices : englishVoices.slice(0, 20);
+}
+
 // ---------- Web Speech wrappers ----------
 function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number; voiceName: string }) {
   const [ttsReady, setTtsReady] = useState(false);
@@ -118,34 +199,40 @@ function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number;
     try {
       window.speechSynthesis.cancel();
       
-      // Get available voices and select the best one
-      const voices = window.speechSynthesis.getVoices();
-      let selectedVoice = voices[0];
+      // Get available voices and filter to best natural voices
+      const allVoices = window.speechSynthesis.getVoices();
+      const bestVoices = getBestVoices(allVoices);
+      let selectedVoice = bestVoices[0] || allVoices.find(v => v.lang.startsWith('en')) || allVoices[0];
       
-      // Try to find user's preferred voice first
+      // Try to find user's preferred voice first (from filtered list)
       if (voiceSettings.voiceName) {
-        const preferredVoice = voices.find(voice => voice.name === voiceSettings.voiceName);
+        const preferredVoice = bestVoices.find(voice => voice.name === voiceSettings.voiceName) ||
+                               allVoices.find(voice => voice.name === voiceSettings.voiceName);
         if (preferredVoice) {
           selectedVoice = preferredVoice;
         }
       }
       
-      // Try to find Amira voice first (default preference)
-      if (!selectedVoice || selectedVoice === voices[0]) {
-        const amiraVoice = voices.find(voice => 
-          voice.name.toLowerCase().includes('amira')
+      // If no preferred voice, use the best natural voice
+      if (!voiceSettings.voiceName || selectedVoice === allVoices[0]) {
+        // Prioritize premium/natural voices
+        const naturalVoice = bestVoices.find(voice => 
+          voice.name.toLowerCase().includes('premium') ||
+          voice.name.toLowerCase().includes('natural') ||
+          voice.name.toLowerCase().includes('neural') ||
+          voice.name.toLowerCase().includes('enhanced') ||
+          voice.name.toLowerCase().includes('google') ||
+          voice.name.toLowerCase().includes('samantha') ||
+          voice.name.toLowerCase().includes('victoria') ||
+          voice.name.toLowerCase().includes('daniel') ||
+          voice.name.toLowerCase().includes('alex')
         );
-        if (amiraVoice) {
-          selectedVoice = amiraVoice;
+        
+        if (naturalVoice) {
+          selectedVoice = naturalVoice;
+        } else if (bestVoices.length > 0) {
+          selectedVoice = bestVoices[0];
         }
-      }
-      
-      // Fallback to best available English voice
-      if (!selectedVoice || !selectedVoice.lang.startsWith('en')) {
-        selectedVoice = voices.find(voice => 
-          voice.lang.startsWith('en') && 
-          (voice.name.includes('Google') || voice.name.includes('Natural') || voice.name.includes('Premium'))
-        ) || voices.find(voice => voice.lang.startsWith('en')) || voices[0];
       }
       
       // If no voices available, return early
@@ -156,18 +243,22 @@ function useSpeech(voiceSettings: { rate: number; pitch: number; volume: number;
       
       const u = new SpeechSynthesisUtterance(text);
       
-      // Enhanced voice settings for better quality
+      // Enhanced voice settings for more natural sound
       u.voice = selectedVoice;
-      u.rate = voiceSettings.rate; // Use user-configured rate
-      u.pitch = voiceSettings.pitch; // Use user-configured pitch
-      u.volume = voiceSettings.volume; // Use user-configured volume
+      // Slightly slower rate for more natural speech (0.85-0.95 range works well)
+      u.rate = Math.max(0.75, Math.min(1.0, voiceSettings.rate)); 
+      // Slightly lower pitch for more natural sound
+      u.pitch = Math.max(0.9, Math.min(1.2, voiceSettings.pitch));
+      u.volume = voiceSettings.volume;
       u.lang = "en-US";
       
-      // Add pauses for better sentence structure
+      // More natural text processing - subtle pauses for better flow
       const enhancedText = text
-        .replace(/([.!?])\s+/g, '$1... ') // Add pauses after sentences
-        .replace(/([,;:])\s+/g, '$1... ') // Add pauses after punctuation
-        .replace(/\.\.\.\s*\.\.\./g, '...'); // Clean up multiple pauses
+        .replace(/([.!?])\s+/g, '$1... ') // Subtle pauses after sentences
+        .replace(/([,;:])\s+/g, '$1... ') // Brief pauses after punctuation
+        .replace(/\.\.\.\s*\.\.\./g, '...') // Clean up multiple pauses
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
       
       u.text = enhancedText;
       
@@ -263,10 +354,10 @@ export default function VoiceScrumMaster() {
     }
   });
   const [voiceSettings, setVoiceSettings] = useState({
-    rate: 0.9,
-    pitch: 1.1,
+    rate: 0.85, // Slightly slower for more natural speech
+    pitch: 1.0, // Neutral pitch for natural sound
     volume: 0.95,
-    voiceName: "Amira"
+    voiceName: "" // Auto-select best natural voice
   });
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   
@@ -935,18 +1026,22 @@ export default function VoiceScrumMaster() {
               </div>
               <div className="grid md:grid-cols-5 gap-4">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Voice</label>
+                  <label className="block text-xs text-slate-500 mb-1">Voice (Top 20 Natural Voices)</label>
                   <select
                     className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border text-sm"
                     value={voiceSettings.voiceName}
                     onChange={(e) => setVoiceSettings(prev => ({ ...prev, voiceName: e.target.value }))}
                   >
-                    <option value="">Auto-select best voice</option>
-                    {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((voice, index) => (
-                      <option key={index} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
+                    <option value="">Auto-select best natural voice</option>
+                    {typeof window !== "undefined" && (() => {
+                      const allVoices = window.speechSynthesis?.getVoices() || [];
+                      const bestVoices = getBestVoices(allVoices);
+                      return bestVoices.map((voice, index) => (
+                        <option key={index} value={voice.name}>
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ));
+                    })()}
                   </select>
                 </div>
                 <div>
