@@ -1051,7 +1051,7 @@ export default function VoiceScrumMaster() {
               <div className="text-sm text-slate-600 flex-1">
                 Video autoplays on load; when it ends, we'll scroll to the Team section below.
                 {videoUrl.includes('ai_nicole') && <span className="text-orange-600 ml-2">(Using AI Nicole )</span>}
-                {videoUrl.includes('rendered_video') && <span className="text-blue-600 ml-2">(Using AI Amy)</span>}
+                {videoUrl.includes('ai_zee') && <span className="text-blue-600 ml-2">(Using AI Zee)</span>}
                 {videoUrl.includes('demo_video') && <span className="text-green-600 ml-2">(Using AI X)</span>}
               </div>
               <div className="flex flex-col gap-2">
@@ -1069,7 +1069,7 @@ export default function VoiceScrumMaster() {
                   onChange={(e) => setVideoUrl(e.target.value)}
                 >
                   <option value="/ai_nicole.mp4">AI Nicole </option>
-                  <option value="/rendered_video.mp4">AI Amy</option>
+                  <option value="/ai_zee.mp4">AI Zee</option>
                   <option value="/demo_video.mp4">AI X</option>
                 </select>
                 <button className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm" onClick={scrollToTeam}>Scroll to Team</button>
