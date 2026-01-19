@@ -268,6 +268,7 @@ export default function VoiceScrumMaster() {
     volume: 0.95,
     voiceName: "Amira"
   });
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   
   const { speak, startListening, stopListening, listening, available } = useSpeech(voiceSettings);
   const [team, setTeam] = useState<Member[]>(() => {
@@ -912,73 +913,93 @@ export default function VoiceScrumMaster() {
         </header>
 
         {/* Voice Settings */}
-        <section className="mb-6 bg-white rounded-2xl shadow p-4">
-          <h2 className="font-semibold mb-3">Voice Settings</h2>
-          <div className="grid md:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Voice</label>
-              <select
-                className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border text-sm"
-                value={voiceSettings.voiceName}
-                onChange={(e) => setVoiceSettings(prev => ({ ...prev, voiceName: e.target.value }))}
-              >
-                <option value="">Auto-select best voice</option>
-                {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((voice, index) => (
-                  <option key={index} value={voice.name}>
-                    {voice.name} ({voice.lang})
-                  </option>
-                ))}
-              </select>
+        <section className="mb-6">
+          {!showVoiceSettings ? (
+            <button
+              className="px-4 py-2 rounded-xl bg-white shadow hover:bg-slate-50 flex items-center gap-2 text-sm font-medium"
+              onClick={() => setShowVoiceSettings(true)}
+            >
+              <span className="text-lg">+</span>
+              <span>Voice Settings</span>
+            </button>
+          ) : (
+            <div className="bg-white rounded-2xl shadow p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold">Voice Settings</h2>
+                <button
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-sm"
+                  onClick={() => setShowVoiceSettings(false)}
+                >
+                  Hide
+                </button>
+              </div>
+              <div className="grid md:grid-cols-5 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Voice</label>
+                  <select
+                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border text-sm"
+                    value={voiceSettings.voiceName}
+                    onChange={(e) => setVoiceSettings(prev => ({ ...prev, voiceName: e.target.value }))}
+                  >
+                    <option value="">Auto-select best voice</option>
+                    {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((voice, index) => (
+                      <option key={index} value={voice.name}>
+                        {voice.name} ({voice.lang})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Speech Rate</label>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2"
+                    step="0.1"
+                    value={voiceSettings.rate}
+                    onChange={(e) => setVoiceSettings(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-slate-500 mt-1">{voiceSettings.rate}x</div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Pitch</label>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2"
+                    step="0.1"
+                    value={voiceSettings.pitch}
+                    onChange={(e) => setVoiceSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-slate-500 mt-1">{voiceSettings.pitch}</div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Volume</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={voiceSettings.volume}
+                    onChange={(e) => setVoiceSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-slate-500 mt-1">{Math.round(voiceSettings.volume * 100)}%</div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Test Voice</label>
+                  <button
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm hover:bg-slate-800"
+                    onClick={() => speak("Hello! This is a test of the voice settings. How does this sound?")}
+                  >
+                    Test Voice
+                  </button>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Speech Rate</label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={voiceSettings.rate}
-                onChange={(e) => setVoiceSettings(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
-                className="w-full"
-              />
-              <div className="text-xs text-slate-500 mt-1">{voiceSettings.rate}x</div>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Pitch</label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={voiceSettings.pitch}
-                onChange={(e) => setVoiceSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
-                className="w-full"
-              />
-              <div className="text-xs text-slate-500 mt-1">{voiceSettings.pitch}</div>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Volume</label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={voiceSettings.volume}
-                onChange={(e) => setVoiceSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
-                className="w-full"
-              />
-              <div className="text-xs text-slate-500 mt-1">{Math.round(voiceSettings.volume * 100)}%</div>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Test Voice</label>
-              <button
-                className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm hover:bg-slate-800"
-                onClick={() => speak("Hello! This is a test of the voice settings. How does this sound?")}
-              >
-                Test Voice
-              </button>
-            </div>
-          </div>
+          )}
         </section>
 
         {/* ---- Onload video section ---- */}
